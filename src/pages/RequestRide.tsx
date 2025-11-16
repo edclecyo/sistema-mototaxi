@@ -1,5 +1,3 @@
-
-
 // src/pages/RequestRide.tsx
 import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
@@ -9,6 +7,7 @@ import {
   Marker,
   Polyline,
   Autocomplete,
+  Circle,
 } from "@react-google-maps/api";
 import { ToastContainer, toast } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
@@ -45,6 +44,8 @@ export default function RequestRide() {
   const originAutoRef = useRef<google.maps.places.Autocomplete | null>(null);
   const destinationAutoRef = useRef<google.maps.places.Autocomplete | null>(null);
   const motoAnimationRef = useRef<NodeJS.Timeout | null>(null);
+  const pulseRef = useRef<NodeJS.Timeout | null>(null);
+  const [pulseRadius, setPulseRadius] = useState(80);
 
   const containerStyle = { width: "100%", height: "300px", borderRadius: "12px" };
   const defaultCenter = { lat: -7.491248, lng: -38.977231 };
@@ -73,7 +74,23 @@ export default function RequestRide() {
 
   useEffect(() => { getCurrentLocation(); }, []);
 
-  // Calcula rota e retorna path para animação
+  // Onda pulsante em volta da moto
+  useEffect(() => {
+    if (!activeMoto || passengerPicked) {
+      if (pulseRef.current) clearInterval(pulseRef.current);
+      setPulseRadius(80);
+      return;
+    }
+
+    pulseRef.current = setInterval(() => {
+      setPulseRadius(prev => (prev >= 120 ? 80 : prev + 2));
+    }, 50);
+
+    return () => {
+      if (pulseRef.current) clearInterval(pulseRef.current);
+    };
+  }, [activeMoto, passengerPicked]);
+
   const calculateRoute = async (start: google.maps.LatLngLiteral, end: google.maps.LatLngLiteral) => {
     if (!start || !end) return [];
     const service = new google.maps.DirectionsService();
@@ -96,18 +113,15 @@ export default function RequestRide() {
     return result.routes[0].overview_path.map(p => ({ lat: p.lat(), lng: p.lng() }));
   };
 
-  // Anima moto de forma suave pelo path
   const animateMotoAlongPath = (path: google.maps.LatLngLiteral[], onComplete?: () => void) => {
     if (!path || path.length < 2) return;
 
     let index = 0;
-    const stepTime = 50; // ms
+    const stepTime = 50;
     const stepDistance = 0.00005;
 
     const moveStep = () => {
-      if (!activeMoto) {
-        setActiveMoto(path[0]);
-      }
+      if (!activeMoto) setActiveMoto(path[0]);
 
       if (index >= path.length - 1) {
         if (onComplete) onComplete();
@@ -129,9 +143,7 @@ export default function RequestRide() {
       setTraveledPath(prev => [...prev, { lat, lng }]);
       setProgress(((index + 1) / path.length) * 100);
 
-      if (Math.abs(lat - end.lat) < 0.00001 && Math.abs(lng - end.lng) < 0.00001) {
-        index++;
-      }
+      if (Math.abs(lat - end.lat) < 0.00001 && Math.abs(lng - end.lng) < 0.00001) index++;
 
       motoAnimationRef.current = setTimeout(moveStep, stepTime);
     };
@@ -139,7 +151,6 @@ export default function RequestRide() {
     moveStep();
   };
 
-  // Confirmar corrida
   const handleConfirmRide = async () => {
     if (!originMarker || !destinationMarker) return toast.error("Selecione origem e destino!");
     if (availableMotos.length === 0) return toast.error("Nenhuma moto disponível!");
@@ -162,14 +173,12 @@ export default function RequestRide() {
     });
   };
 
-  // Finalizar corrida
   const handleEndRide = () => {
     if (motoAnimationRef.current) clearTimeout(motoAnimationRef.current);
     setDestination(""); 
     setDestinationMarker(null); 
     setEstimatedPrice(null); 
-    setDistance(""); 
-    setDuration("");
+    setDistance(""); setDuration("");
     setDirections(undefined); 
     setTraveledPath([]); 
     setProgress(0); 
@@ -180,7 +189,6 @@ export default function RequestRide() {
     getCurrentLocation();
   };
 
-  // Clique no mapa
   const handleMapClick = async (event: google.maps.MapMouseEvent) => {
     if (!event.latLng || rideConfirmed) return;
     const latlng = { lat: event.latLng.lat(), lng: event.latLng.lng() };
@@ -288,12 +296,32 @@ export default function RequestRide() {
               {availableMotos.map((moto, idx) => (
                 <Marker key={idx} position={moto} icon={{ url: motoIcon, scaledSize: new window.google.maps.Size(40, 40) }} />
               ))}
-              {activeMoto && <Marker position={activeMoto} icon={{
-                url: motoIcon,
-                scaledSize: new window.google.maps.Size(50, 50),
-                rotation: motoRotation,
-                anchor: new window.google.maps.Point(25, 25)
-              }} />}
+
+              {activeMoto && (
+                <>
+                  <Marker position={activeMoto} icon={{
+                    url: motoIcon,
+                    scaledSize: new window.google.maps.Size(50, 50),
+                    rotation: motoRotation,
+                    anchor: new window.google.maps.Point(25, 25)
+                  }} />
+
+                  {!passengerPicked && (
+                    <Circle
+                      center={activeMoto}
+                      radius={pulseRadius}
+                      options={{
+                        fillColor: "#4285F4",
+                        fillOpacity: 0.2,
+                        strokeColor: "#4285F4",
+                        strokeOpacity: 0.5,
+                        strokeWeight: 2,
+                      }}
+                    />
+                  )}
+                </>
+              )}
+
               {originMarker && <Marker position={originMarker} icon={{ url: personIcon, scaledSize: new window.google.maps.Size(40, 40) }} />}
               {destinationMarker && <Marker position={destinationMarker} icon={{ url: destinationIcon, scaledSize: new window.google.maps.Size(45, 45) }} />}
               {directions && <DirectionsRenderer directions={directions} options={{ polylineOptions: { strokeColor: "#000", strokeWeight: 4 }, suppressMarkers: true }} />}
